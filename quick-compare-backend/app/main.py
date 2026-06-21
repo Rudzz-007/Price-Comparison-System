@@ -3,32 +3,35 @@ import time
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.schemas import SearchResponse, ProductResult
+from fastapi.middleware.cors import CORSMiddleware
+
+# Import schemas, database tools, models, and analytical engines
+from app.schemas import SearchResponse, ProductResult, SearchQueryInput
 from app.database import engine, Base, get_db
 from app.models import ProductPriceHistory
 from app.scraper import scrape_live_platform
-from fastapi.middleware.cors import CORSMiddleware
-
-# Import analytics and machine learning engines
 from app.analytics import get_price_trends
 from app.predictor import predict_future_price
 
-app = FastAPI(title="Quick-Commerce Price Aggregator API Optimized")
+app = FastAPI(title="Quick-Commerce Price Aggregator API - Production Ready")
 
+# ------------------------------------------------------------------
+# SECURITY LAYER: CORS COMPLIANCE CONFIGURATION
+# ------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"], # Allows your React dev server port to talk safely
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ------------------------------------------------------------------
-# PERFORMANCE ARCHITECTURE LAYER: IN-MEMORY CACHE SCHEMA
+# PERFORMANCE LAYER: IN-MEMORY CACHE STORAGE
 # ------------------------------------------------------------------
 # Structure: { "query_term": { "timestamp": datetime, "data": SearchResponse } }
 SEARCH_CACHE = {}
-CACHE_TTL_MINUTES = 5  # Cache data for 5 minutes before re-scraping
+CACHE_TTL_MINUTES = 5  # Cache data for 5 minutes before allowing re-scraping
 
 @app.on_event("startup")
 async def startup_event():
@@ -37,7 +40,7 @@ async def startup_event():
     print("[DATABASE] Physical tables synced successfully.")
 
 # ------------------------------------------------------------------
-# PERFORMANCE ARCHITECTURE LAYER: DIAGNOSTICS MIDDLEWARE
+# PERFORMANCE LAYER: LIVE DIAGNOSTICS MIDDLEWARE
 # ------------------------------------------------------------------
 @app.middleware("http")
 async def add_performance_diagnostics_headers(request: Request, call_next):
@@ -65,38 +68,50 @@ def simulate_platform_scraper(query: str, platform_name: str, base_price: float)
         product_url=f"https://{platform_name.lower().replace(' ', '')}.com/mock-{query}"
     )
 
-# 1. Optimized Core Search Aggregator with Cache Lookup Logic
+# ------------------------------------------------------------------
+# ROUTING LAYER: HARDENED & CACHED CORE SEARCH ENDPOINT
+# ------------------------------------------------------------------
 @app.get("/api/v1/search", response_model=SearchResponse)
 async def search_products(query: str, db: AsyncSession = Depends(get_db)):
-    query_key = query.strip().lower()
+    # 1. Input Gateway Security Sanitization Layer
+    try:
+        validated_input = SearchQueryInput(query=query)
+        clean_query = validated_input.query.strip().lower()
+    except Exception:
+        raise HTTPException(
+            status_code=400, 
+            detail="Security Alert: Search query contains prohibited characters or violates length parameters."
+        )
+
+    query_key = clean_query
     current_time = datetime.utcnow()
     
-    # Check if a fresh cache entry exists for this search term
+    # 2. Performance Caching Interception Check
     if query_key in SEARCH_CACHE:
         cache_entry = SEARCH_CACHE[query_key]
         if current_time - cache_entry["timestamp"] < timedelta(minutes=CACHE_TTL_MINUTES):
             print(f"[CACHE HIT] Serving results for '{query_key}' directly from memory.")
-            # Create response copy and flag it as cached
-            cached_response = cache_entry["data"]
-            return cached_response
+            return cache_entry["data"]
 
     print(f"[CACHE MISS] Executing scraping pipeline for '{query_key}'.")
     platforms = ["Blinkit", "Zepto", "Swiggy Instamart"]
     aggregated_results = []
     
+    # 3. Live Data Multi-Platform Ingestion Loop
     for platform in platforms:
-        live_items = await scrape_live_platform(query, platform)
+        live_items = await scrape_live_platform(clean_query, platform)
         
         if not live_items:
-            base_market_price = 14.0 if "maggi" in query.lower() else 33.0 if "milk" in query.lower() else 45.0
-            fallback_item = simulate_platform_scraper(query, platform, base_market_price)
+            base_market_price = 14.0 if "maggi" in clean_query else 33.0 if "milk" in clean_query else 45.0
+            fallback_item = simulate_platform_scraper(clean_query, platform, base_market_price)
             live_items = [fallback_item]
             
         for scraped_item in live_items:
             aggregated_results.append(scraped_item)
             
+            # Record analytical timeline snapshot to PostgreSQL
             history_entry = ProductPriceHistory(
-                query_term=query,
+                query_term=clean_query,
                 platform=scraped_item.platform,
                 title=scraped_item.title,
                 price=scraped_item.price,
@@ -105,11 +120,11 @@ async def search_products(query: str, db: AsyncSession = Depends(get_db)):
             db.add(history_entry)
             
     await db.commit()
+    
+    # 4. Sorting & Response Caching Compilation
     sorted_results = sorted(aggregated_results, key=lambda item: item.price)
+    response_data = SearchResponse(search_query=clean_query, results=sorted_results)
     
-    response_data = SearchResponse(search_query=query, results=sorted_results)
-    
-    # Store compiled search datasets inside the memory cache dictionary
     SEARCH_CACHE[query_key] = {
         "timestamp": current_time,
         "data": response_data
@@ -117,18 +132,25 @@ async def search_products(query: str, db: AsyncSession = Depends(get_db)):
     
     return response_data
 
-# 2. Data Science Analytics Endpoint
+# ------------------------------------------------------------------
+# ROUTING LAYER: DATA SCIENCE TREND ANALYTICS ENDPOINT
+# ------------------------------------------------------------------
 @app.get("/api/v1/analytics/trends")
 async def get_item_analytics(query: str, db: AsyncSession = Depends(get_db)):
     trends = await get_price_trends(query, db)
     return trends
 
-# 3. Exponential Moving Average Prediction Forecasting Endpoint
+# ------------------------------------------------------------------
+# ROUTING LAYER: PREDICTIVE MACHINE LEARNING EXPONENTIAL FORECAST
+# ------------------------------------------------------------------
 @app.get("/api/v1/predict/price")
 async def get_price_prediction(query: str, platform: str, db: AsyncSession = Depends(get_db)):
     prediction = await predict_future_price(query, platform, db)
     return prediction
 
+# ------------------------------------------------------------------
+# ROUTING LAYER: API HOME LANDING VIEW
+# ------------------------------------------------------------------
 @app.get("/")
 def home():
     return {"message": "Welcome to the Grocery Price Comparator API! Append /docs to the URL to view interactive documentation."}

@@ -1,14 +1,18 @@
-from pydantic import BaseModel #class used to create structured data models that automatically validate incoming and outgoing data types
-from typing import Optional, List #Optional allows fields to be empty (None), and List allows a variable to hold an array of items
+from pydantic import BaseModel, Field
+from typing import Optional, List
 
 class ProductResult(BaseModel):
-    title: str #product name 
-    platform: str #3 options zepto,blinkit,instarmart 
+    title: str 
+    platform: str 
     price: float
     quantity: str
-    image_url: Optional[str] = None  #craper fails to find an image, this field defaults gracefully to None without crashing our app
+    image_url: Optional[str] = None  
     product_url: Optional[str] = None
 
-class SearchResponse(BaseModel):  #SearchResponse to layout what our final search API endpoint returns to the frontend user interface
+class SearchResponse(BaseModel):  
     search_query: str
     results: List[ProductResult]
+
+# New Input Validation Schema to prevent SQL Injection / XSS payloads
+class SearchQueryInput(BaseModel):
+    query: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-zA-Z0-9\s\-\(\)]+$")
