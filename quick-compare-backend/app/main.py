@@ -1,5 +1,7 @@
 import random
-from fastapi import FastAPI, Depends, HTTPException
+import time
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas import SearchResponse, ProductResult
 from app.database import engine, Base, get_db
@@ -7,11 +9,11 @@ from app.models import ProductPriceHistory
 from app.scraper import scrape_live_platform
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import your analytics and machine learning engines
+# Import analytics and machine learning engines
 from app.analytics import get_price_trends
 from app.predictor import predict_future_price
 
-app = FastAPI(title="Quick-Commerce Price Aggregator API")
+app = FastAPI(title="Quick-Commerce Price Aggregator API Optimized")
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,11 +23,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ------------------------------------------------------------------
+# PERFORMANCE ARCHITECTURE LAYER: IN-MEMORY CACHE SCHEMA
+# ------------------------------------------------------------------
+# Structure: { "query_term": { "timestamp": datetime, "data": SearchResponse } }
+SEARCH_CACHE = {}
+CACHE_TTL_MINUTES = 5  # Cache data for 5 minutes before re-scraping
+
 @app.on_event("startup")
 async def startup_event():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     print("[DATABASE] Physical tables synced successfully.")
+
+# ------------------------------------------------------------------
+# PERFORMANCE ARCHITECTURE LAYER: DIAGNOSTICS MIDDLEWARE
+# ------------------------------------------------------------------
+@app.middleware("http")
+async def add_performance_diagnostics_headers(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+    
+    # Inject latency stats directly into response headers for frontend tracking
+    response.headers["X-Process-Time-Ms"] = f"{round(process_time, 2)}"
+    return response
 
 def simulate_platform_scraper(query: str, platform_name: str, base_price: float):
     platform_modifier = {
@@ -43,9 +65,22 @@ def simulate_platform_scraper(query: str, platform_name: str, base_price: float)
         product_url=f"https://{platform_name.lower().replace(' ', '')}.com/mock-{query}"
     )
 
-# 1. Core Live Search Aggregator
+# 1. Optimized Core Search Aggregator with Cache Lookup Logic
 @app.get("/api/v1/search", response_model=SearchResponse)
 async def search_products(query: str, db: AsyncSession = Depends(get_db)):
+    query_key = query.strip().lower()
+    current_time = datetime.utcnow()
+    
+    # Check if a fresh cache entry exists for this search term
+    if query_key in SEARCH_CACHE:
+        cache_entry = SEARCH_CACHE[query_key]
+        if current_time - cache_entry["timestamp"] < timedelta(minutes=CACHE_TTL_MINUTES):
+            print(f"[CACHE HIT] Serving results for '{query_key}' directly from memory.")
+            # Create response copy and flag it as cached
+            cached_response = cache_entry["data"]
+            return cached_response
+
+    print(f"[CACHE MISS] Executing scraping pipeline for '{query_key}'.")
     platforms = ["Blinkit", "Zepto", "Swiggy Instamart"]
     aggregated_results = []
     
@@ -71,15 +106,24 @@ async def search_products(query: str, db: AsyncSession = Depends(get_db)):
             
     await db.commit()
     sorted_results = sorted(aggregated_results, key=lambda item: item.price)
-    return SearchResponse(search_query=query, results=sorted_results)
+    
+    response_data = SearchResponse(search_query=query, results=sorted_results)
+    
+    # Store compiled search datasets inside the memory cache dictionary
+    SEARCH_CACHE[query_key] = {
+        "timestamp": current_time,
+        "data": response_data
+    }
+    
+    return response_data
 
-# 2. ADDED: Data Science Analytics Endpoint
+# 2. Data Science Analytics Endpoint
 @app.get("/api/v1/analytics/trends")
 async def get_item_analytics(query: str, db: AsyncSession = Depends(get_db)):
     trends = await get_price_trends(query, db)
     return trends
 
-# 3. ADDED: Exponential Moving Average Prediction Forecasting Endpoint
+# 3. Exponential Moving Average Prediction Forecasting Endpoint
 @app.get("/api/v1/predict/price")
 async def get_price_prediction(query: str, platform: str, db: AsyncSession = Depends(get_db)):
     prediction = await predict_future_price(query, platform, db)
