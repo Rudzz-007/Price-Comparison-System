@@ -1,0 +1,1 @@
+# It tells Python that the app folder is not just a random directory, but a structured package module that can export code to other files. Leave this file completely blank inside.
