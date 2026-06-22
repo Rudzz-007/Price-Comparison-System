@@ -1,65 +1,87 @@
+import os
 import httpx
 from bs4 import BeautifulSoup
 from app.schemas import ProductResult
 
-# A standard browser User-Agent header to prevent target web nodes from instantly blocking our request
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
+# Try to pull the API key from your environment configuration, or fall back to an empty string
+SCRAPINGBEE_API_KEY = os.getenv("SCRAPINGBEE_API_KEY", "YOUR_FREE_API_KEY")
+PROXY_GATEWAY_URL = "https://app.scrapingbee.com/api/v1/"
 
-async def scrape_live_platform(query: str, platform_name: str) -> list[ProductResult]:
+async def scrape_live_platform(query: str, platform_name: str) -> list:
     """
-    Asynchronously requests a target commerce layout, parses its HTML architecture,
-    and returns a structured list of clean ProductResult objects.
+    Asynchronously channels requests through a proxy network gateway
+    to bypass Cloudflare/Akamai firewalls and extract live product listings.
     """
-    # For day 6 simulation/testing against a stable layout, we target a sandbox mock store
-    # Swap this URL format out when targeting specific production quick-commerce endpoint routes
-    url = f"https://mock-shop.com/search?q={query}&platform={platform_name.lower()}"
+    # If you haven't supplied a real API key yet, silently fall back to mock simulation layer
+    if SCRAPINGBEE_API_KEY == "YOUR_FREE_API_KEY" or not SCRAPINGBEE_API_KEY:
+        print(f"[SCRAPER] No proxy API key detected. Using sample link definitions for '{platform_name}'.")
+        return []
+
+    # Map target search URLs for each quick-commerce engine
+    target_urls = {
+        "Zepto": f"https://www.zepto.co.in/search?q={query}",
+        "Blinkit": f"https://blinkit.com/s/?q={query}",
+        "Swiggy Instamart": f"https://www.swiggy.com/instamart/search?query={query}"
+    }
     
-    results = []
-    
+    target_url = target_urls.get(platform_name)
+    if not target_url:
+        return []
+
+    # Set configuration parameters for the proxy gateway provider
+    params = {
+        "api_key": SCRAPINGBEE_API_KEY,
+        "url": target_url,
+        "render_js": "false",  # Keep it ultra-fast by skipping unnecessary JS engine rendering
+        "premium_proxy": "true" # Uses residential IPs to bypass strict blocks
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
     try:
-        # Use an async HTTP client session so other backend requests don't pause while waiting for the network
-        async with httpx.AsyncClient(headers=HEADERS, timeout=10.0) as client:
-            response = await client.get(url)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            print(f"[PROXY REQ] Dispatching hidden proxy tunnel for {platform_name}...")
+            response = await client.get(PROXY_GATEWAY_URL, params=params, headers=headers)
             
             if response.status_code != 200:
-                print(f"[SCRAPER WARNING] Platform {platform_name} responded with status code {response.status_code}")
-                return results
+                print(f"[PROXY WARN] Server responded with status code {response.status_code} for {platform_name}")
+                return []
                 
-            html_content = response.text
+            # Parse the clean returned HTML DOM string using BeautifulSoup
+            soup = BeautifulSoup(response.text, "html.parser")
+            parsed_results = []
             
-        # Parse the raw HTML text string into a searchable node tree object
-        soup = BeautifulSoup(html_content, "html.parser")
-        
-        # Locate all individual product card wrapper containers matching the target store class layout
-        product_cards = soup.find_all("div", class_="product-card")
-        
-        for card in product_cards:
-            # Safely look up text strings within specified HTML structural tags
-            title_tag = card.find("h3", class_="product-title")
-            price_tag = card.find("span", class_="product-price")
-            qty_tag = card.find("span", class_="product-qty")
-            img_tag = card.find("img", class_="product-image")
-            
-            if title_tag and price_tag:
-                # Clean strings by stripping whitespace and sanitizing price characters
-                title = title_tag.text.strip()
-                raw_price = price_tag.text.replace("₹", "").replace(",", "").strip()
-                quantity = qty_tag.text.strip() if qty_tag else "1 unit"
-                image_url = img_tag["src"] if img_tag else None
+            # --- EXAMPLE PARSING BLOCKS (Dynamic adjustments based on live HTML selectors) ---
+            if platform_name == "Zepto":
+                # Find product cards based on Zepto's container class tags
+                items = soup.find_all("div", class_=lambda c: c and "ProductCard" in c)
+                for item in items[:2]:  # Limit to top 2 matches to keep performance optimized
+                    title_el = item.find("h5")
+                    price_el = item.find(text=lambda t: t and "₹" in t)
+                    
+                    if title_el and price_el:
+                        try:
+                            price_val = float(price_el.replace("₹", "").strip())
+                            parsed_results.append(ProductResult(
+                                title=title_el.text.strip(),
+                                platform="Zepto",
+                                price=price_val,
+                                quantity="Unit Pack",
+                                image_url="https://via.placeholder.com/150?text=Zepto+Live",
+                                product_url=target_url
+                            ))
+                        except ValueError:
+                            continue
+                            
+            # Return our structured live extracted array
+            if parsed_results:
+                print(f"[LIVE SUCCESS] Extracted {len(parsed_results)} genuine rows from {platform_name}!")
+                return parsed_results
                 
-                results.append(
-                    ProductResult(
-                        title=title,
-                        platform=platform_name,
-                        price=float(raw_price),
-                        quantity=quantity,
-                        image_url=image_url,
-                        product_url=url
-                    )
-                )
+            return []
+
     except Exception as e:
-        print(f"[SCRAPER ERROR] Exception thrown during execution loop for {platform_name}: {str(e)}")
-        
-    return results
+        print(f"[SCRAPE EXCEPTION] Network pipeline error on {platform_name}: {e}")
+        return []
