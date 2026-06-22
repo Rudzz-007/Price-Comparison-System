@@ -13,8 +13,6 @@ function App() {
   // Telemetry Performance State variables
   const [latency, setLatency] = useState(null);
   const [isCached, setIsCached] = useState(false);
-
-  // Tracks historical queries to visually detect cache states locally
   const [searchedTerms, setSearchedTerms] = useState(new Set());
 
   const handleSearch = async (e) => {
@@ -30,7 +28,6 @@ function App() {
       const searchRes = await fetch(`http://127.0.0.1:8000/api/v1/search?query=${query}`);
       if (!searchRes.ok) throw new Error("Failed to grab live platform data inputs.");
       
-      // Capture custom latency header injected by our backend middleware
       const timingHeader = searchRes.headers.get("X-Process-Time-Ms");
       setLatency(timingHeader || "N/A");
 
@@ -54,12 +51,13 @@ function App() {
       fetchPrediction(query, activePlatform);
     } catch (err) {
       console.error("Pipeline connectivity error:", err);
-      setError("Unable to communicate with the FastAPI Backend. Verify Uvicorn is active on port 8000.");
+      setError("Security Alert or Connectivity Issue: Verification parameters violated or Uvicorn offline.");
     } finally {
       setLoading(false);
     }
   };
 
+  // Fixed Template Literal String Interpolation with the missing $ sign
   const fetchPrediction = async (itemQuery, platformName) => {
     try {
       const predRes = await fetch(`http://127.0.0.1:8000/api/v1/predict/price?query=${itemQuery}&platform=${platformName}`);
@@ -88,9 +86,9 @@ function App() {
               Smart Grocery Aggregator
             </h1>
           </div>
-          <span className="text-xs bg-purple-50 text-purple-600 font-medium px-3 py-1 rounded-full border border-purple-100 shadow-sm">
+          {/* <span className="text-xs bg-purple-50 text-purple-600 font-medium px-3 py-1 rounded-full border border-purple-100 shadow-sm">
             Frontend Engine Live
-          </span>
+          </span> */}
         </header>
 
         {/* Main Framework View */}
@@ -161,9 +159,9 @@ function App() {
 
               {/* Right Column: Analytics & Data Science Trends */}
               <div className="space-y-6">
-                <h2 className="text-xl font-bold flex items-center gap-2 text-indigo-800">
+                {/* <h2 className="text-xl font-bold flex items-center gap-2 text-indigo-800">
                   Data Science Insights
-                </h2>
+                </h2> */}
 
                 {/* 30-Day Market Baseline */}
                 <div className="bg-white rounded-xl p-5 border border-purple-100 space-y-4 shadow-sm">
@@ -267,8 +265,8 @@ function App() {
         </main>
       </div>
 
-      {/* NEW SYSTEM PERFORMANCE TELEMETRY BOTTOM PANEL */}
-      {latency && (
+      {/* SYSTEM PERFORMANCE TELEMETRY BOTTOM PANEL */}
+      {/* {latency && (
         <footer className="max-w-6xl w-full mx-auto mt-12 bg-white border border-purple-100 rounded-xl p-4 shadow-md flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-2 text-slate-600 text-sm font-semibold">
             <Cpu className="h-5 w-5 text-purple-600 animate-pulse" />
@@ -276,13 +274,11 @@ function App() {
           </div>
           
           <div className="flex items-center space-x-6">
-            {/* Latency Metric Indicator */}
             <div className="flex items-center space-x-2 text-xs font-bold bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg border border-purple-50">
               <Zap className="h-4 w-4 text-amber-500" />
               <span>Backend API Latency: <span className="font-mono text-purple-600">{latency} ms</span></span>
             </div>
 
-            {/* Cache Strategy Flag */}
             <div className={`flex items-center space-x-2 text-xs font-bold px-3 py-1.5 rounded-lg border ${
               isCached 
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
@@ -293,7 +289,7 @@ function App() {
             </div>
           </div>
         </footer>
-      )}
+      )} */}
     </div>
   );
 }
